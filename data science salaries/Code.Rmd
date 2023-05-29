@@ -1,0 +1,313 @@
+
+```{r}
+library(bslib)
+options(scipen = 99) # me-non-aktifkan scientific notation
+library(tidyverse) # koleksi beberapa package R
+library(dplyr) # grammar of data manipulation
+library(readr) # membaca data
+library(ggplot2) # plot statis
+library(plotly) # plot interaktif
+library(glue) # setting tooltip
+library(scales) # mengatur skala pada plot
+library(DT) #menampilkan dataframe
+library(shiny)
+library(shinydashboard)
+library(rworldmap)
+library(tidyverse)
+library(countrycode)
+library(XML)
+library(maps)
+library(scales)
+```
+
+
+```{r}
+ds <- read_csv("ds_salaries.csv")
+ds
+glimpse(ds)
+```
+
+server
+```{r}
+#server
+ds_clean <- ds %>% 
+  mutate( across(
+        .cols = everything(),
+        ~str_replace( ., "EN", "Entry-Level"))
+        ) %>%
+  mutate( across(
+        .cols = everything(),
+        ~str_replace( ., "MI", "Mid-Level"))
+        ) %>%
+  mutate( across(
+        .cols = everything(),
+        ~str_replace( ., "SE", "Senior-Level"))
+        ) %>%
+  mutate( across(
+        .cols = everything(),
+        ~str_replace( ., "EX", "Executive-Level"))
+        ) %>% 
+  mutate(
+    experience_level = as.factor(experience_level),
+    employment_type = as.factor(employment_type),
+    job_title = as.factor(job_title),
+    salary_currency = as.factor(salary_currency),
+    employee_residence = as.factor(employee_residence),
+    remote_ratio = as.factor(remote_ratio),
+    company_location = as.factor(company_location),
+    company_size = as.factor(company_size),
+    salary = as.double(salary),
+    salary_in_usd = as.double(salary_in_usd),
+    company_country = countrycode(company_location, "iso2c", "country.name"),
+    region = as.factor(company_country)
+    ) %>% 
+  select(-c(...1)) %>% 
+  drop_na()
+  
+ds_clean
+glimpse(ds_clean)
+
+nrow(ds_clean)
+
+
+```
+
+top10 company location
+```{r}
+#top 10 data science company location
+top10_loc <- ds_clean %>% count(company_location) %>% arrange(desc(n)) %>% head(10)
+top10_loc
+```
+
+top10 job title - done
+```{r}
+#top 10 job title halaman 2
+top10_title <- ds_clean %>% count(job_title) %>%
+  arrange(desc(n)) %>% 
+  mutate(label = glue("Job Title: {job_title}
+                      Number of Sample: {n} persons ")) %>% 
+  head(10)
+
+#create plot
+plot2 <- top10_title %>% 
+  ggplot(aes(x = n,
+             y = reorder(job_title, n),
+             fill = n,
+             text = label)) +
+  geom_col() +
+  scale_fill_gradient(low = "black", high = "red") +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  labs(title = 'Top 10 Data Science Job Title Worldwide',
+       subtitle = "This plot shows the Job Title of Data Scientist worldwide",
+       x = 'Number of Person',
+       y = NULL)
+
+plot2
+ggplotly(plot2, tooltip = "text")
+
+```
+
+DONE
+2 selectinput dgn filter pertama country, filter kedua job title yg ada dari country. Plot nya adalah bar plot, dgn axis x adalah job title yg available dari country tersebut, dan y adalah jumlah orang (number of people)
+```{r}
+#code untuk select country and role
+ds_countryrole <- ds_clean %>%
+  select(c(12, 4)) %>%
+  group_by(company_country) %>% 
+  count(job_title) %>% 
+  mutate(
+    company_country = as.factor(company_country),
+    job_title = as.character(job_title),
+    n = as.double(n)) %>% 
+  arrange("company_country") %>%
+  mutate(across(everything(), ~ ifelse(is.na(.), 0, .))) %>% 
+  mutate(label = glue("Job Title: {job_title}
+                      Number of Sample: {n} persons "))
+    
+    plot2b <- ds_countryrole%>% 
+      ggplot(aes(x = n,
+                 y = reorder(job_title, n),
+                 fill = n,
+                 text = label)) +
+      geom_col() +
+      scale_fill_gradient(low = "black", high = "red") +
+      theme_minimal() +
+      theme(legend.position = "none") +
+      labs(title = 'Data Science Job Title by Country',
+           x = 'Number of Person',
+           y = NULL)
+    
+    plot2b
+    ggplotly(plot2b, tooltip = "text")
+
+```
+
+HELP!!!!
+goal : interactive map dgn tooltip, menunjukkan peta dan warna akan menjadi lbh gelap saat negara tsb punya banyak company (company_location)
+Saat mapdata di left_join dgn mapdata, sepertinya menjadi masalah karena dataframe nya jd berantakan (jumlah negara nya dari 50 jadi 44000 an).. saat plotting dgn ggplot, max company juga jadi nya di 30, padahal di US ada 355
+```{r}
+#map of company location
+no_of_companies <- aggregate(ds_clean$company_country, list(ds_clean$company_country), table)
+
+no_of_companies <- no_of_companies %>% 
+  rename(
+    region = Group.1,
+    Number_of_companies = x
+    )
+
+no_of_companies
+
+map_data <- read.csv("https://raw.githubusercontent.com/plotly/datasets/master/2014_world_gdp_with_codes.csv")
+map_data<-left_join(map_data,no_of_companies,by=c("COUNTRY"="region"))
+map_data<-na.omit(map_data)
+map<-plot_ly(map_data, type='choropleth', locations=map_data$CODE, z=map_data$Number_of_companies, text=map_data$COUNTRY, colorscale="Cividis", reversescale = T) %>%
+layout(title = "Number of companies employing Data Scientist")
+map
+
+ggplotly(map)
+
+```
+
+
+CANCEL
+salary analysis
+goal : membuat sebuah barplot dgn selectinput (input pertama by country, lalu input kedua adalah experience yg ada di country tsb). untuk selectinput nya sdh jadi di UI, lalu nanti saat dipilih, axis x = title2 yang ada di negara tsb, axis y adalah usd salary. barplot nya nanti bs menunjukkan max, min, dan average dari title tsb (di beberapa negara, ada experience dan title yang sama lebih dari 1, tapi gaji nya berbeda)
+
+kendala : codingnya ga paham sama sekali
+```{r}
+ds_salary <- ds_clean %>% 
+  select(c(2,4,7,12)) %>% 
+  rename(
+    country = company_country,
+    USDsalary = salary_in_usd,
+    title = job_title,
+    experience = experience_level) %>% 
+  arrange(country)
+
+plot3 <- ggplot(#ds_salary[which(ds_salary$Country == "Algeria")],
+  ds_salary, 
+  aes(x = title, y = USDsalary/1000, text = round(USDsalary/1000, 0))) +
+  geom_boxplot(outlier.shape = NA) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90)) +
+  labs(title = "Salary based on Job Title in USD ($k)",
+       x = NULL,
+       y = "salary ($k)") +
+  scale_y_continuous(labels = dollar_format())
+
+ggplotly(plot3, tooltip = "text")
+
+  ds_salary <- ds_clean %>% 
+    select(c(2,4,7,12)) %>% 
+    rename(
+      country = company_country,
+      USDsalary = salary_in_usd,
+      title = job_title,
+      experience = experience_level) %>% 
+    arrange(country)
+  
+  country_data <- reactive({
+   test <-ds_salary %>% 
+      filter(Country == input$country)
+      print(test)})
+  
+  output$salary_analysis <- renderPlotly({
+    plot3 <- ggplot(country_data(), aes(x = title, y = USDsalary/1000, text = round(USDsalary/1000, 0))) +
+      geom_boxplot(outlier.shape = NA) +
+      theme_minimal() +
+      theme(axis.text.x = element_text(angle = 90)) +
+      labs(title = "Salary based on Job Title in USD ($k)",
+           x = NULL,
+           y = "salary ($k)") +
+      scale_y_continuous(labels = dollar_format())
+    
+    ggplotly(plot3, tooltip = "text")
+    
+  })
+  
+  
+  
+  
+    #observe({
+    #x <- input$country
+    #y <- ds_salary %>% 
+     # filter(country == x) %>% 
+#      group_by(title) %>% 
+ #     summarise()
+    
+  #  updateSelectInput(session, "title", "Job Title", choices = y)
+  
+
+
+```
+
+
+
+DONE
+remote work trend analysis, nanti pakai checkbox input, isi checkbox input nya no remote work, partial remote, sama full remote. Untuk x axis nya nanti tahun 2020, 2021, 2022
+goal : Data yang ditampilin saat di tick adalah 3 bar buat nunjukkin trend remote_ratio 2020 -2022 tapi dalam bentuk percentage
+
+yang kurang: bikin percentage tiap remote_ratio type per year
+```{r}
+# remote work trend analysis, nanti pakai checkbox input, isi checkbox input nya no remote work, partial remote, sama full remote. Untuk x axis nya nanti tahun 2020, 2021, 2022. Data yang ditampilin saat di tick adalah 3 bar buat nunjukkin trend remote_ratio 2020 -2022 tapi dalam bentuk percentage
+
+sum(remotework$work_year == 2020)
+sum(remotework$work_year == 2021)
+sum(remotework$work_year == 2022)
+
+ds_remotework <- ds_clean %>% 
+  select(c(1, 9)) %>% 
+  mutate(
+    remote_ratio=case_when(
+    remote_ratio=="0" ~ "No remote",
+    remote_ratio=="50" ~ "Partial remote",
+    remote_ratio=="100" ~ "Full remote")) %>%
+  group_by(work_year, remote_ratio) %>% 
+  tally() %>%
+  mutate(percentage = round(n/sum(n), 3),
+         in_percent = percentage*100,
+         work_year = as.factor(work_year),
+         remote_ratio = as.factor(remote_ratio)) %>% 
+  mutate(label = glue("Remote Ratio: {remote_ratio}
+                      Percentage: {in_percent}%
+                      Number of People: {n} people")) %>% 
+  arrange(remote_ratio) 
+
+ds_remotework
+
+"plotremoteratio <- ds_remotework %>%
+  ggplot(aes(x = work_year,
+             y = in_percent,
+             fill = remote_ratio,
+             text = label)) +
+  geom_bar(aes(group = remote_ratio), stat = "identity") +
+  theme_minimal() +
+  scale_fill_brewer(palette = "Pastel1") +
+  labs(title = 'Remote work ratio',
+           x = NULL,
+           y = 'Percentage') +
+  guides(fill=guide_legend("Remote Ratio")) +
+  ylim(0,100)
+
+ggplotly(plotremoteratio, tooltip = "text")"
+
+
+plotremoteratio2 <- ds_remotework %>% 
+       ggplot(aes(x = work_year,
+                  y = in_percent,
+                  text = label)) +
+       geom_line(aes(group = remote_ratio, col = remote_ratio)) +
+       geom_point() +
+       theme_minimal() +
+       labs(title = 'Remote work ratio',
+            x = NULL,
+            y = 'Percentage') +
+       guides(fill=guide_legend("Remote Ratio")) +
+  ylim (0,100)
+  
+ggplotly(plotremoteratio2, tooltip = "text")
+  
+#yang kurang : bikin percentage tiap remote_ratio type per year
+```
+
